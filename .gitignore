@@ -3,3 +3,21 @@
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
+
+# sbt
+target/
+
+# IDE
+.idea/
+.bsp/
+
+# macOS
+.DS_Store
+
+# Application config with secrets
+application.conf
+
+# Google Sheet credentials
+service-account-credentials.json
+
+Specifications.md
