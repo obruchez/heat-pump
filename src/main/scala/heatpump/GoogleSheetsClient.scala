@@ -13,8 +13,6 @@ import scala.jdk.CollectionConverters._
 
 object GoogleSheetsClient {
 
-  private val SheetName = "Sheet1"
-
   /** Result of duplicate checking. */
   sealed trait DuplicateCheckResult
   case object NoDuplicate extends DuplicateCheckResult
@@ -40,6 +38,12 @@ object GoogleSheetsClient {
       case e: Exception => Left(s"Failed to initialize Google Sheets service: ${e.getMessage}")
     }
 
+  /** Gets the name of the first sheet in the spreadsheet. */
+  private def getSheetName(service: Sheets, spreadsheetId: String): String = {
+    val spreadsheet = service.spreadsheets().get(spreadsheetId).execute()
+    spreadsheet.getSheets.get(0).getProperties.getTitle
+  }
+
   /** Checks if a row with today's date already exists. */
   def checkDuplicate(
       service: Sheets,
@@ -48,7 +52,8 @@ object GoogleSheetsClient {
   ): Either[String, DuplicateCheckResult] =
     try {
       val dateStr = reading.date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-      val range = s"$SheetName!A:L"
+      val sheetName = getSheetName(service, spreadsheetId)
+      val range = s"'$sheetName'!A:L"
       val response = service.spreadsheets().values().get(spreadsheetId, range).execute()
       val rows = Option(response.getValues).map(_.asScala.toList).getOrElse(Nil)
 
@@ -80,7 +85,8 @@ object GoogleSheetsClient {
       reading: HeatPumpReading
   ): Either[String, Unit] =
     try {
-      // Step 1: Get the sheet ID (needed for InsertDimensionRequest)
+      // Step 1: Get sheet metadata
+      val sheetName = getSheetName(service, spreadsheetId)
       val sheetId = getSheetId(service, spreadsheetId)
 
       // Step 2: Insert an empty row at index 1 (row 2 in 1-based)
@@ -107,7 +113,7 @@ object GoogleSheetsClient {
         .setValues(java.util.Collections.singletonList(values))
 
       service.spreadsheets().values()
-        .update(spreadsheetId, s"$SheetName!A2:L2", body)
+        .update(spreadsheetId, s"'$sheetName'!A2:L2", body)
         .setValueInputOption("RAW")
         .execute()
 

@@ -32,5 +32,6 @@ lazy val root = (project in file("."))
         val oldStrategy = (assembly / assemblyMergeStrategy).value
         oldStrategy(x)
     },
-    assembly / mainClass := Some("heatpump.Main")
+    assembly / mainClass := Some("heatpump.Main"),
+    assembly / assemblyJarName := "heat-pump-to-sheets.jar"
   )
