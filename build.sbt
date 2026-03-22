@@ -14,6 +14,8 @@ lazy val root = (project in file("."))
       "com.google.api-client"    % "google-api-client-gson"          % "2.7.2",
       "com.google.apis"          % "google-api-services-sheets"      % "v4-rev20250106-2.0.0",
       "com.google.auth"          % "google-auth-library-oauth2-http" % "1.31.0",
+      // EXIF metadata
+      "com.drewnoakes" % "metadata-extractor" % "2.19.0",
       // Test
       "org.scalatest" %% "scalatest" % "3.2.19" % Test
     ),

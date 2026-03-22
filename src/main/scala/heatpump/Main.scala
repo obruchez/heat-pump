@@ -1,7 +1,5 @@
 package heatpump
 
-import java.time.LocalDate
-
 object Main {
 
   def main(args: Array[String]): Unit = {
@@ -62,10 +60,17 @@ object Main {
     // Cleanup temp files
     ImagePreprocessor.cleanup(resizedPhotos, photos)
 
-    // Step 5: Assemble reading
-    val today = LocalDate.now()
-    println(s"\nAssembling reading for date: $today")
-    val reading = HeatPumpReading.fromPhotos(extractedPhotos, today) match {
+    // Step 5: Extract common date from photo EXIF data
+    val photoDate = ExifDateExtractor.findCommonDate(photos) match {
+      case Right(d) => d
+      case Left(err) =>
+        System.err.println(s"Date extraction error: $err")
+        sys.exit(1)
+    }
+
+    // Step 6: Assemble reading
+    println(s"\nAssembling reading for date: $photoDate")
+    val reading = HeatPumpReading.fromPhotos(extractedPhotos, photoDate) match {
       case Right(r) => r
       case Left(err) =>
         System.err.println(s"Error assembling reading: $err")
@@ -92,7 +97,7 @@ object Main {
       sys.exit(0)
     }
 
-    // Step 6: Google Sheets integration
+    // Step 7: Google Sheets integration
     println("\nConnecting to Google Sheets...")
     val sheetsService = GoogleSheetsClient.buildService(config) match {
       case Right(s) => s
@@ -104,10 +109,10 @@ object Main {
     // Check for duplicates
     GoogleSheetsClient.checkDuplicate(sheetsService, config.spreadsheetId, reading) match {
       case Right(GoogleSheetsClient.ExactDuplicate) =>
-        println("A row with today's date and identical values already exists. No insertion needed.")
+        println("A row with this date and identical values already exists. No insertion needed.")
 
       case Right(GoogleSheetsClient.DifferentValues(existing)) =>
-        println(s"Warning: A row with today's date exists but has different values:")
+        println(s"Warning: A row with this date exists but has different values:")
         println(s"  Existing: ${existing.mkString(", ")}")
         println(s"  New:      ${reading.toRow.mkString(", ")}")
         if (UserInput.confirm("Insert a new row with the new values anyway?")) {
@@ -125,7 +130,7 @@ object Main {
         insertAndReport(sheetsService, config.spreadsheetId, reading)
     }
 
-    // Step 7: Move processed files
+    // Step 8: Move processed files
     println("\nMoving processed files...")
     FileWatcher.moveToProcessed(photos, config.watchDirectory, config.processedDirectory) match {
       case Right(()) => ()
