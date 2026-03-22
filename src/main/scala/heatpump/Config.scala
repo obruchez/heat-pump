@@ -11,7 +11,9 @@ case class AppConfig(
     spreadsheetId: String,
     credentialsFile: Path,
     maxImageWidth: Int,
-    pollIntervalSeconds: Int
+    pollIntervalSeconds: Int,
+    boundsFactor: Double,
+    boundsMinDailyChange: Double
 )
 
 object Config {
@@ -27,7 +29,9 @@ object Config {
           spreadsheetId = config.getString("spreadsheet-id"),
           credentialsFile = Paths.get(config.getString("credentials-file")),
           maxImageWidth = config.getInt("max-image-width"),
-          pollIntervalSeconds = config.getInt("poll-interval-seconds")
+          pollIntervalSeconds = config.getInt("poll-interval-seconds"),
+          boundsFactor = if (config.hasPath("bounds-factor")) config.getDouble("bounds-factor") else 10.0,
+          boundsMinDailyChange = if (config.hasPath("bounds-min-daily-change")) config.getDouble("bounds-min-daily-change") else 1.0
         )
       )
     } catch {

@@ -16,7 +16,43 @@ object Main {
     // Step 2: Wait for 4 photos
     val photos = FileWatcher.waitForPhotos(config.watchDirectory, config.pollIntervalSeconds)
 
-    // Step 3: Preprocess (resize) images
+    // Step 3: Extract common date from photo EXIF data
+    val photoDate = ExifDateExtractor.findCommonDate(photos) match {
+      case Right(d) => d
+      case Left(err) =>
+        System.err.println(s"Date extraction error: $err")
+        sys.exit(1)
+    }
+    println(s"\nPhoto date: $photoDate")
+
+    // Step 4: Connect to Google Sheets and read historical data for bounds
+    println("\nConnecting to Google Sheets...")
+    val sheetsService = GoogleSheetsClient.buildService(config) match {
+      case Right(s) => s
+      case Left(err) =>
+        System.err.println(s"Google Sheets error: $err")
+        sys.exit(1)
+    }
+
+    val bounds: Map[PhotoType, PhotoBounds] = GoogleSheetsClient.readLastRows(sheetsService, config.spreadsheetId) match {
+      case Right((Some(lastRow), secondToLastRow)) =>
+        val b = ValueBounds.compute(lastRow, secondToLastRow, photoDate, config.boundsFactor, config.boundsMinDailyChange)
+        println(s"  Computed bounds from last row (${lastRow.date})" +
+          secondToLastRow.map(r => s" and previous row (${r.date})").getOrElse("") +
+          s" with factor ${config.boundsFactor}")
+        println()
+        ValueBounds.printBounds(b)
+        b
+      case Right((None, _)) =>
+        println("  No historical data found, skipping bounds.")
+        Map.empty
+      case Left(err) =>
+        println(s"  Warning: Could not read historical data: $err")
+        println("  Proceeding without bounds.")
+        Map.empty
+    }
+
+    // Step 5: Preprocess (resize) images
     println("\nPreprocessing images...")
     val resizedPhotos = photos.map { photo =>
       ImagePreprocessor.resizeIfNeeded(photo, config.maxImageWidth) match {
@@ -27,11 +63,11 @@ object Main {
       }
     }
 
-    // Step 4: Send each photo to Claude API
+    // Step 6: Send each photo to Claude API
     println("\nAnalyzing photos with Claude API...")
     val extractedPhotos = resizedPhotos.zip(photos).map { case (resizedPath, originalPath) =>
       println(s"  Processing ${originalPath.getFileName}...")
-      ClaudeClient.analyzePhoto(resizedPath, config) match {
+      ClaudeClient.analyzePhoto(resizedPath, config, bounds) match {
         case Right(response) =>
           val photoType = PhotoType.fromString(response.photoType) match {
             case Some(pt) =>
@@ -60,15 +96,7 @@ object Main {
     // Cleanup temp files
     ImagePreprocessor.cleanup(resizedPhotos, photos)
 
-    // Step 5: Extract common date from photo EXIF data
-    val photoDate = ExifDateExtractor.findCommonDate(photos) match {
-      case Right(d) => d
-      case Left(err) =>
-        System.err.println(s"Date extraction error: $err")
-        sys.exit(1)
-    }
-
-    // Step 6: Assemble reading
+    // Step 7: Assemble reading
     println(s"\nAssembling reading for date: $photoDate")
     val reading = HeatPumpReading.fromPhotos(extractedPhotos, photoDate) match {
       case Right(r) => r
@@ -77,36 +105,32 @@ object Main {
         sys.exit(1)
     }
 
-    // Display summary
+    // Step 8: Check bounds and display summary
+    val warnings = if (bounds.nonEmpty) ValueBounds.checkReading(reading, bounds) else Map.empty[String, String]
+
+    def warn(fieldId: String): String =
+      warnings.get(fieldId).map(w => s"  ⚠ $w").getOrElse("")
+
     println("\nExtracted values:")
     println(s"  Date:                              ${reading.date}")
-    println(s"  B - Consommation totale:           ${reading.consommationTotale}")
-    println(s"  C - Chauffage appoint (chauffage):  ${reading.chauffageAppointChauff}")
-    println(s"  D - Chauffage appoint (ECS):        ${reading.chauffageAppointECS}")
-    println(s"  E - Compresseur total:              ${reading.compresseurTotal}")
-    println(s"  F - Compresseur chauffage:           ${reading.compresseurChauff}")
-    println(s"  G - Compresseur ECS:                 ${reading.compresseurECS}")
-    println(s"  H - Compresseur refroid.:            ${reading.compresseurRefroid}")
-    println(s"  I - Energie fournie totale:          ${reading.energieFournieTotale}")
-    println(s"  J - Energie fournie chauffage:       ${reading.energieFournieChauffage}")
-    println(s"  K - Energie fournie ECS:             ${reading.energieFournieECS}")
-    println(s"  L - Energie fournie refroid.:        ${reading.energieFournieRefroid}")
+    println(s"  B - Consommation totale:           ${reading.consommationTotale}${warn("consommationTotale")}")
+    println(s"  C - Chauffage appoint (chauffage):  ${reading.chauffageAppointChauff}${warn("chauffageAppointChauff")}")
+    println(s"  D - Chauffage appoint (ECS):        ${reading.chauffageAppointECS}${warn("chauffageAppointECS")}")
+    println(s"  E - Compresseur total:              ${reading.compresseurTotal}${warn("compresseurTotal")}")
+    println(s"  F - Compresseur chauffage:           ${reading.compresseurChauff}${warn("compresseurChauff")}")
+    println(s"  G - Compresseur ECS:                 ${reading.compresseurECS}${warn("compresseurECS")}")
+    println(s"  H - Compresseur refroid.:            ${reading.compresseurRefroid}${warn("compresseurRefroid")}")
+    println(s"  I - Energie fournie totale:          ${reading.energieFournieTotale}${warn("energieFournieTotale")}")
+    println(s"  J - Energie fournie chauffage:       ${reading.energieFournieChauffage}${warn("energieFournieChauffage")}")
+    println(s"  K - Energie fournie ECS:             ${reading.energieFournieECS}${warn("energieFournieECS")}")
+    println(s"  L - Energie fournie refroid.:        ${reading.energieFournieRefroid}${warn("energieFournieRefroid")}")
 
     if (!UserInput.confirm("\nInsert these values into the Google Sheet?")) {
       println("Aborted by user.")
       sys.exit(0)
     }
 
-    // Step 7: Google Sheets integration
-    println("\nConnecting to Google Sheets...")
-    val sheetsService = GoogleSheetsClient.buildService(config) match {
-      case Right(s) => s
-      case Left(err) =>
-        System.err.println(s"Google Sheets error: $err")
-        sys.exit(1)
-    }
-
-    // Check for duplicates
+    // Step 9: Check for duplicates and insert
     GoogleSheetsClient.checkDuplicate(sheetsService, config.spreadsheetId, reading) match {
       case Right(GoogleSheetsClient.ExactDuplicate) =>
         println("A row with this date and identical values already exists. No insertion needed.")
@@ -130,7 +154,7 @@ object Main {
         insertAndReport(sheetsService, config.spreadsheetId, reading)
     }
 
-    // Step 8: Move processed files
+    // Step 10: Move processed files
     println("\nMoving processed files...")
     FileWatcher.moveToProcessed(photos, config.watchDirectory, config.processedDirectory) match {
       case Right(()) => ()

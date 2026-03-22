@@ -16,27 +16,32 @@ object ClaudeClient {
 
   private val httpClient = HttpClient.newHttpClient()
 
-  /** The structured prompt sent to Claude for each photo. */
-  private val systemPrompt =
-    """You are analyzing a photo of a heat pump LCD screen. The text is in French.
-      |The screen shows energy values in kWh (the unit may appear as "kW" due to space constraints, but it is always kWh).
-      |
-      |Identify which of the 4 screen types this photo shows:
-      |1. "Consommation d'énergie" - Shows: Total
-      |2. "Chauffage appoint élec." - Shows: Total, Chauff., Eau chaude sanitaire
-      |3. "Compresseur" - Shows: Total, Chauff., Eau chaude sanitaire, Refroid.
-      |4. "Energie fournie" - Shows: Total, Chauffage, ECS, Refroid. (labels may vary: "Energie fournie Total", "Energie fournie Chauffage", "Energie fournie ECS", "Energie de ref. fournie")
-      |
-      |Return a JSON object with:
-      |- "type": the screen title (one of the 4 types above, use the exact French label)
-      |- "values": an object mapping each label to its integer value (without units). Use null if a value is unreadable.
-      |  For screen type 1, use key "Total".
-      |  For screen type 2, use keys "Total", "Chauff.", "Eau chaude sanitaire".
-      |  For screen type 3, use keys "Total", "Chauff.", "Eau chaude sanitaire", "Refroid.".
-      |  For screen type 4, use keys "Total", "Chauffage", "ECS", "Refroid.".
-      |- "confident": true if you are confident in all values, false if any value is uncertain.
-      |
-      |Return ONLY the JSON object, no other text.""".stripMargin
+  /** Builds the prompt sent to Claude for each photo, optionally including value bounds. */
+  private def buildPrompt(bounds: Map[PhotoType, PhotoBounds]): String = {
+    val base =
+      """You are analyzing a photo of a heat pump LCD screen. The text is in French.
+        |The screen shows energy values in kWh (the unit may appear as "kW" due to space constraints, but it is always kWh).
+        |
+        |Identify which of the 4 screen types this photo shows:
+        |1. "Consommation d'énergie" - Shows: Total
+        |2. "Chauffage appoint élec." - Shows: Total, Chauff., Eau chaude sanitaire
+        |3. "Compresseur" - Shows: Total, Chauff., Eau chaude sanitaire, Refroid.
+        |4. "Energie fournie" - Shows: Total, Chauffage, ECS, Refroid. (labels may vary: "Energie fournie Total", "Energie fournie Chauffage", "Energie fournie ECS", "Energie de ref. fournie")
+        |
+        |Return a JSON object with:
+        |- "type": the screen title (one of the 4 types above, use the exact French label)
+        |- "values": an object mapping each label to its integer value (without units). Use null if a value is unreadable.
+        |  For screen type 1, use key "Total".
+        |  For screen type 2, use keys "Total", "Chauff.", "Eau chaude sanitaire".
+        |  For screen type 3, use keys "Total", "Chauff.", "Eau chaude sanitaire", "Refroid.".
+        |  For screen type 4, use keys "Total", "Chauffage", "ECS", "Refroid.".
+        |- "confident": true if you are confident in all values, false if any value is uncertain.
+        |
+        |Return ONLY the JSON object, no other text.""".stripMargin
+
+    if (bounds.isEmpty) base
+    else s"$base\n\n${ValueBounds.formatForPrompt(bounds)}"
+  }
 
   /** Case class for parsing Claude's inner JSON response. */
   private case class InnerResponse(
@@ -47,11 +52,15 @@ object ClaudeClient {
   private implicit val decodeInnerResponse: Decoder[InnerResponse] = deriveDecoder[InnerResponse]
 
   /** Sends a photo to Claude and extracts structured data. */
-  def analyzePhoto(imagePath: Path, config: AppConfig): Either[String, ClaudePhotoResponse] = {
+  def analyzePhoto(
+      imagePath: Path,
+      config: AppConfig,
+      bounds: Map[PhotoType, PhotoBounds] = Map.empty
+  ): Either[String, ClaudePhotoResponse] = {
     for {
       base64Data <- encodeImage(imagePath)
       mediaType  <- detectMediaType(imagePath)
-      response   <- sendRequest(base64Data, mediaType, config)
+      response   <- sendRequest(base64Data, mediaType, config, bounds)
       parsed     <- parseResponse(response)
     } yield parsed
   }
@@ -71,7 +80,13 @@ object ClaudeClient {
     else Left(s"Unsupported image format: $name (expected .jpg, .jpeg, or .png)")
   }
 
-  private def sendRequest(base64Data: String, mediaType: String, config: AppConfig): Either[String, String] = {
+  private def sendRequest(
+      base64Data: String,
+      mediaType: String,
+      config: AppConfig,
+      bounds: Map[PhotoType, PhotoBounds] = Map.empty
+  ): Either[String, String] = {
+    val prompt = buildPrompt(bounds)
     val requestBody = Json.obj(
       "model" -> config.claudeModel.asJson,
       "max_tokens" -> 1024.asJson,
@@ -89,7 +104,7 @@ object ClaudeClient {
             ),
             Json.obj(
               "type" -> "text".asJson,
-              "text" -> systemPrompt.asJson
+              "text" -> prompt.asJson
             )
           )
         )

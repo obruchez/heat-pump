@@ -44,6 +44,28 @@ object GoogleSheetsClient {
     spreadsheet.getSheets.get(0).getProperties.getTitle
   }
 
+  /**
+   * Reads the last two data rows (rows 2 and 3, right after the header).
+   * Returns (lastRow, secondToLastRow) as optional HeatPumpReadings.
+   */
+  def readLastRows(
+      service: Sheets,
+      spreadsheetId: String
+  ): Either[String, (Option[HeatPumpReading], Option[HeatPumpReading])] =
+    try {
+      val sheetName = getSheetName(service, spreadsheetId)
+      val range = s"'$sheetName'!A2:L3"
+      val response = service.spreadsheets().values().get(spreadsheetId, range).execute()
+      val rows = Option(response.getValues).map(_.asScala.toList).getOrElse(Nil)
+
+      val lastRow = rows.headOption.flatMap(r => HeatPumpReading.fromRow(r.asScala.toList.map(_.toString)))
+      val secondToLastRow = rows.lift(1).flatMap(r => HeatPumpReading.fromRow(r.asScala.toList.map(_.toString)))
+
+      Right((lastRow, secondToLastRow))
+    } catch {
+      case e: Exception => Left(s"Failed to read last rows: ${e.getMessage}")
+    }
+
   /** Checks if a row with today's date already exists. */
   def checkDuplicate(
       service: Sheets,
