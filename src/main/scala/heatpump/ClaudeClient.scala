@@ -136,12 +136,24 @@ object ClaudeClient {
     for {
       json <- parse(responseBody).left.map(e => s"Failed to parse Claude response JSON: ${e.getMessage}")
       text <- extractTextContent(json)
+      usage <- extractUsage(json)
       inner <- parseInnerJson(text)
     } yield ClaudePhotoResponse(
       photoType = inner.`type`,
       values = inner.values,
-      confident = inner.confident
+      confident = inner.confident,
+      inputTokens = usage._1,
+      outputTokens = usage._2
     )
+  }
+
+  /** Extracts input_tokens and output_tokens from the Claude API response. */
+  private def extractUsage(json: Json): Either[String, (Int, Int)] = {
+    val cursor = json.hcursor.downField("usage")
+    for {
+      input <- cursor.downField("input_tokens").as[Int].left.map(_ => "Missing usage.input_tokens")
+      output <- cursor.downField("output_tokens").as[Int].left.map(_ => "Missing usage.output_tokens")
+    } yield (input, output)
   }
 
   /** Extracts the text from content[0].text in the Claude API response. */
@@ -154,6 +166,20 @@ object ClaudeClient {
         s"Failed to extract text from Claude response: $errorMsg"
       })
   }
+
+  /** Known pricing per million tokens (input, output) for common models. */
+  private val pricing: Map[String, (Double, Double)] = Map(
+    // https://claude.com/pricing#api
+    "claude-opus-4-20250514" -> (5.0, 25.0),
+    "claude-sonnet-4-20250514" -> (3.0, 15.0),
+    "claude-haiku-3-5-20241022" -> (1.0, 5.0)
+  )
+
+  /** Estimates cost in USD for given token counts and model. Returns None if model pricing is unknown. */
+  def estimateCost(model: String, inputTokens: Int, outputTokens: Int): Option[Double] =
+    pricing.get(model).map { case (inputPrice, outputPrice) =>
+      (inputTokens / 1_000_000.0) * inputPrice + (outputTokens / 1_000_000.0) * outputPrice
+    }
 
   /** Parses the inner JSON (Claude's actual answer) which may be wrapped in markdown code fences. */
   private def parseInnerJson(text: String): Either[String, InnerResponse] = {

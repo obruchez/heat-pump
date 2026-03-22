@@ -37,7 +37,9 @@ object PhotoType {
 case class ClaudePhotoResponse(
     photoType: String,
     values: Map[String, Option[Int]],
-    confident: Boolean
+    confident: Boolean,
+    inputTokens: Int,
+    outputTokens: Int
 )
 
 /**

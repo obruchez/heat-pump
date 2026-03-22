@@ -65,10 +65,15 @@ object Main {
 
     // Step 6: Send each photo to Claude API
     println("\nAnalyzing photos with Claude API...")
+    var totalInputTokens = 0
+    var totalOutputTokens = 0
     val extractedPhotos = resizedPhotos.zip(photos).map { case (resizedPath, originalPath) =>
       println(s"  Processing ${originalPath.getFileName}...")
       ClaudeClient.analyzePhoto(resizedPath, config, bounds) match {
         case Right(response) =>
+          totalInputTokens += response.inputTokens
+          totalOutputTokens += response.outputTokens
+
           val photoType = PhotoType.fromString(response.photoType) match {
             case Some(pt) =>
               println(s"    Identified as: ${pt.label}")
@@ -92,6 +97,13 @@ object Main {
           sys.exit(1)
       }
     }
+
+    // Print API usage
+    val costStr = ClaudeClient.estimateCost(config.claudeModel, totalInputTokens, totalOutputTokens) match {
+      case Some(cost) => f" (estimated cost: $$$cost%.4f)"
+      case None       => ""
+    }
+    println(s"  API usage: $totalInputTokens input + $totalOutputTokens output tokens$costStr")
 
     // Cleanup temp files
     ImagePreprocessor.cleanup(resizedPhotos, photos)
