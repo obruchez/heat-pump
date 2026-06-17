@@ -170,9 +170,9 @@ object ClaudeClient {
   /** Known pricing per million tokens (input, output) for common models. */
   private val pricing: Map[String, (Double, Double)] = Map(
     // https://claude.com/pricing#api
-    "claude-opus-4-20250514" -> (5.0, 25.0),
-    "claude-sonnet-4-20250514" -> (3.0, 15.0),
-    "claude-haiku-3-5-20241022" -> (1.0, 5.0)
+    "claude-opus-4-8" -> (5.0, 25.0),
+    "claude-sonnet-4-6" -> (3.0, 15.0),
+    "claude-haiku-4-5" -> (1.0, 5.0)
   )
 
   /** Estimates cost in USD for given token counts and model. Returns None if model pricing is unknown. */
